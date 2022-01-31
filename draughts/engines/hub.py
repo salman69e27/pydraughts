@@ -20,7 +20,6 @@ import logging
 import threading
 import time
 import draughts
-import draughts.engine
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +171,7 @@ class HubEngine:
             self.send("set-param name=%s value=%s" % (name, value))
 
     def go(self, position, my_time=None, inc=None, movetime=None, clock=None, depth=None, analysisnodes=None, 
-           handicap=None, searchnodes=None, ply=None, moves=None, ponder=False):
+           handicap=None, searchnodes=None, ply=None, moves=None, analyze=False, ponder=False):
         if moves is None:
             moves = ''
         if moves and len(moves) != 0:
@@ -215,7 +214,9 @@ class HubEngine:
 
         if analysisnodes is not None:
             self.send("level nodes=%s" % str(analysisnodes))
-        if ponder:
+        if analyze:
+            self.send("go analyze")
+        elif ponder:
             self.send("go ponder")
         else:
             self.send("go think")
@@ -225,6 +226,7 @@ class HubEngine:
         info["pondermove"] = None
         info["taken"] = ""
         info["pondertaken"] = ""
+        info["score"] = None
 
         start = time.time()
         while True:
@@ -238,7 +240,7 @@ class HubEngine:
                     # info["taken"] = ""
                     # info["score"] = {"win": 0}
                     # return info
-                    return None, None, None, None
+                    return None
                 bestmoveval = arg_split[0]
                 if bestmoveval and bestmoveval.find("=") != -1:
                     bestmove = bestmoveval.split("=")[1]
@@ -272,7 +274,7 @@ class HubEngine:
                         for t in taken:
                             alltaken += "%02d" % int(t)
                         info["pondertaken"] = alltaken
-                return info["bestmove"], info["pondermove"], info["taken"], info["pondertaken"]
+                return info
             elif command == "info":
                 arg = arg or ""
 
@@ -295,25 +297,7 @@ class HubEngine:
                         if name_and_value[0] in ["nodes", "depth"]:
                             info[name_and_value[0]] = int(value)
                         elif name_and_value[0] == "score":
-                            score = int(float(value) * 100)
-                            if abs(score) > 9000:
-                                if score > 0:
-                                    plies = 10000 - score
-                                    moves = int((plies + plies % 2) / 2)
-                                else:
-                                    plies = -(10000 + score)
-                                    moves = int((plies - plies % 2) / 2)
-                                info["score"] = {"win": moves}
-                            elif abs(score) > 8000:
-                                if score > 0:
-                                    plies = 9000 - score
-                                    moves = int((plies + plies % 2) / 2)
-                                else:
-                                    plies = -(9000 + score)
-                                    moves = int((plies - plies % 2) / 2)
-                                info["score"] = {"win": moves}
-                            else:
-                                info["score"] = {"cp": score}
+                            info["score"] = float(value)
                         elif name_and_value[0] == "time":
                             info["time"] = int(float(value) * 1000)
                         elif name_and_value[0] == "nps":
@@ -362,25 +346,3 @@ class HubEngine:
 
     def quit(self):
         self.send("quit")
-
-    def play(self, board, time_limit, ponder):
-        time = time_limit.time
-        inc = time_limit.inc
-        depth = time_limit.depth
-        nodes = time_limit.nodes
-        movetime = time_limit.movetime
-        hub_moves = board.move_stack
-        hub_moves = list(map(lambda move: move.hub_move, hub_moves))
-        bestmove, pondermove, taken, pondertaken = self.go(board.initial_hub_fen, moves=' '.join(hub_moves), my_time=time, inc=inc, depth=depth, analysisnodes=nodes, movetime=movetime, ponder=ponder)
-
-        ponder_move = None
-        if bestmove is None:
-            return None, None
-        ponder_board = board.copy()
-        best_move = draughts.Move(ponder_board, hub_position_move=bestmove + taken)
-        if pondermove:
-            for move in best_move.board_move:
-                ponder_board.move(move)
-            ponder_move = draughts.Move(ponder_board, hub_position_move=pondermove + pondertaken)
-
-        return draughts.engine.PlayResult(best_move, ponder_move, self.info)
